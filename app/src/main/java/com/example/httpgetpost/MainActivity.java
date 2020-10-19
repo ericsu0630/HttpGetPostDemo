@@ -2,26 +2,42 @@ package com.example.httpgetpost;
 
 import androidx.appcompat.app.AppCompatActivity;
 
+import android.content.Context;
+import android.media.MediaPlayer;
 import android.os.AsyncTask;
 import android.os.Bundle;
+import android.os.Handler;
 import android.util.Log;
 import android.widget.TextView;
 import java.io.BufferedReader;
 import java.io.DataOutputStream;
 import java.io.InputStreamReader;
-import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.util.ArrayList;
+import java.util.Timer;
+import java.util.TimerTask;
 
 import javax.net.ssl.HttpsURLConnection;
 
 public class MainActivity extends AppCompatActivity {
     TextView textView;
+    Handler handler;
+    Timer voicePlayerTimer;
+    MediaPlayer voiceMediaPlayer;
+    ArrayList<Integer> voicePlaylist;
+    PlayListBuilder playlist;
+    int voicePlaylistCounter = 0;
+    String currentNumber="";
+    Context voiceContext;
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+        voiceContext = this;
         textView = findViewById(R.id.textView);
+        handler = new Handler();
+        playlist = new PlayListBuilder();
         Thread thread = new Thread() {
 
             @Override
@@ -30,14 +46,25 @@ public class MainActivity extends AppCompatActivity {
                 try {
                     while (!currentThread().isInterrupted()) {
                         Thread.sleep(1000);
-                        runOnUiThread(new Runnable() {
+                        handler.post(new Runnable() {
                             @Override
                             public void run() {
                                 String queueNumber;
                                 GetQueueNumberAsyncTask dl = new GetQueueNumberAsyncTask();
                                 try{
                                     queueNumber = dl.execute("https://lineup.blueeyes.com.tw/counter.php?k=7b2007112425a79e08498ac36ff76f948945890c").get();
-                                    textView.setText(queueNumber);
+                                    if(!queueNumber.equals(currentNumber)) {
+                                        textView.setText(queueNumber);
+                                        voicePlaylist = playlist.buildPlaylist(Integer.parseInt(queueNumber), voiceContext);
+                                        voiceMediaPlayer = MediaPlayer.create(voiceContext, voicePlaylist.get(0));
+                                        voiceMediaPlayer.start();
+                                        voicePlayerTimer = new Timer();
+                                        if (voicePlaylist.size() > 1) {
+                                            playNextVoice(); //first iteration
+                                        }
+                                        currentNumber = queueNumber;
+                                        voicePlaylistCounter = 0;
+                                    }
                                 }catch(Exception e){
                                     e.printStackTrace();
                                 }
@@ -50,6 +77,33 @@ public class MainActivity extends AppCompatActivity {
             }
         };
         thread.start();
+    }
+
+    public void playNextVoice() { //recursive function
+        voicePlayerTimer.schedule(new TimerTask() {
+            @Override
+            public void run() {
+                voiceMediaPlayer.reset();
+                try {
+                    voiceMediaPlayer = MediaPlayer.create(MainActivity.this, voicePlaylist.get(++voicePlaylistCounter));
+                    voiceMediaPlayer.start();
+                }catch (IndexOutOfBoundsException e){
+                    Log.i("There is a problem!", "Array out of bounds!");
+                }
+                if (voicePlaylist.size() > voicePlaylistCounter +1) { //stopping condition
+                    playNextVoice();
+                }
+            }
+        }, voiceMediaPlayer.getDuration());
+    }
+
+    @Override
+    public void onDestroy() {
+        if (voiceMediaPlayer.isPlaying())
+            voiceMediaPlayer.stop();
+        voiceMediaPlayer.release();
+        voicePlayerTimer.cancel();
+        super.onDestroy();
     }
 
     public class GetQueueNumberAsyncTask extends AsyncTask<String, Void, String> {
